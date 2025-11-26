@@ -74,6 +74,11 @@ const options = {
 let gui;
 let lightFolders = [];
 
+// Spotlight visualization - circle on the ground
+let spotlightCircle = null;
+let spotlightCircleBuffer = null;
+let spotlightCircleVAO = null;
+
 function setup(shaders) {
     const canvas = document.getElementById('gl-canvas');
     
@@ -117,6 +122,9 @@ function setup(shaders) {
     CYLINDER.init(gl);
     SPHERE.init(gl, program);
     
+    // Initialize spotlight circle visualization
+    initSpotlightCircle(gl);
+    
     // Create platform (10 x 0.5 x 10, upper face at y=0)
     sceneObjects.push({
         object: CUBE,
@@ -133,10 +141,10 @@ function setup(shaders) {
         material: materials.cube
     });
     
-    // Quadrant 2: Torus (lower-left)
+    // Quadrant 2: Torus (lower-left originalmente, agora troca com cilindro)
     sceneObjects.push({
         object: TORUS,
-        transform: mult(translate(-2.5, 1, -2.5), scalem(2, 2, 2)),
+        transform: mult(translate(2.5, 1, 2.5), scalem(2, 2, 2)),
         material: materials.torus
     });
     
@@ -147,10 +155,10 @@ function setup(shaders) {
         material: bunnyMaterial
     });
     
-    // Quadrant 4: Cylinder (upper-right)
+    // Quadrant 4: Cylinder (upper-right originalmente, agora troca com torus)
     sceneObjects.push({
         object: CYLINDER,
-        transform: mult(translate(2.5, 1, 2.5), scalem(2, 2, 2)),
+        transform: mult(translate(-2.5, 1, -2.5), scalem(2, 2, 2)),
         material: materials.cylinder
     });
     
@@ -461,6 +469,99 @@ function uploadShadingMode() {
     }
 }
 
+function initSpotlightCircle(gl) {
+    const segments = 32;
+    const points = [];
+    const indices = [];
+    
+    // Center point
+    points.push(0, 0, 0);
+    
+    // Circle points
+    for (let i = 0; i <= segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        points.push(Math.cos(angle), 0, Math.sin(angle));
+    }
+    
+    // Create triangle fan indices
+    for (let i = 1; i <= segments; i++) {
+        indices.push(0, i, i + 1);
+    }
+    indices.push(0, segments, 1); // Close the circle
+    
+    // Create VAO
+    spotlightCircleVAO = gl.createVertexArray();
+    gl.bindVertexArray(spotlightCircleVAO);
+    
+    // Upload vertices
+    const pointsBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, pointsBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.STATIC_DRAW);
+    
+    const a_position = 0;
+    gl.vertexAttribPointer(a_position, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(a_position);
+    
+    // Upload indices
+    spotlightCircleBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, spotlightCircleBuffer);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
+    
+    gl.bindVertexArray(null);
+    
+    spotlightCircle = {
+        indices: indices.length,
+        points: points.length / 3
+    };
+}
+
+function drawSpotlightCircle(gl, program, light) {
+    if (light.type !== 2 || !light.enabled) return; // Only for spotlights
+    
+    // Calculate where spotlight hits the ground (y=0)
+    const lightPos = vec3(light.position[0], light.position[1], light.position[2]);
+    const lightDir = normalize(vec3(-light.axis[0], -light.axis[1], -light.axis[2]));
+    
+    // If light is above ground and pointing down
+    if (lightPos[1] > 0 && lightDir[1] < 0) {
+        // Calculate intersection with ground plane (y=0)
+        const t = -lightPos[1] / lightDir[1];
+        const groundPos = vec3(
+            lightPos[0] + lightDir[0] * t,
+            0.01, // Slightly above ground to avoid z-fighting
+            lightPos[2] + lightDir[2] * t
+        );
+        
+        // Calculate circle radius based on distance and aperture
+        const distance = Math.abs(lightPos[1] / lightDir[1]);
+        const radius = distance * Math.tan((light.aperture / 2) * Math.PI / 180);
+        
+        // Create transformation matrix for the circle
+        const circleTransform = mult(
+            translate(groundPos[0], groundPos[1], groundPos[2]),
+            scalem(radius, 1, radius)
+        );
+        
+        // Upload transformation
+        uploadModelView(circleTransform);
+        
+        // Use a semi-transparent material for the circle
+        const circleMaterial = {
+            Ka: [255, 255, 200],
+            Kd: [255, 255, 200],
+            Ks: [255, 255, 255],
+            shininess: 1
+        };
+        uploadMaterialUniforms(circleMaterial);
+        
+        // Draw the circle
+        gl.bindVertexArray(spotlightCircleVAO);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, spotlightCircleBuffer);
+        gl.drawElements(gl.TRIANGLES, spotlightCircle.indices, gl.UNSIGNED_SHORT, 0);
+        gl.bindVertexArray(null);
+    }
+}
+
 function render() {
     requestAnimationFrame(render);
     
@@ -475,9 +576,29 @@ function render() {
     uploadLights();
     uploadShadingMode(); // 0 = Gouraud (vertex shader), 1 = Phong (fragment shader)
     
-    // Render each object
-    for (let i = 0; i < sceneObjects.length; i++) {
-        const obj = sceneObjects[i];
+    // Sort objects by distance from camera (render farthest first for proper depth)
+    const sortedObjects = sceneObjects.map((obj, index) => {
+        // Extract position from transform matrix (translation is in last column)
+        const pos = vec3(
+            obj.transform[0][3],
+            obj.transform[1][3],
+            obj.transform[2][3]
+        );
+        // Calculate distance from camera
+        const dist = Math.sqrt(
+            Math.pow(pos[0] - camera.eye[0], 2) +
+            Math.pow(pos[1] - camera.eye[1], 2) +
+            Math.pow(pos[2] - camera.eye[2], 2)
+        );
+        return { obj, dist, index };
+    });
+    
+    // Sort by distance (farthest first)
+    sortedObjects.sort((a, b) => b.dist - a.dist);
+    
+    // Render each object in sorted order
+    for (let i = 0; i < sortedObjects.length; i++) {
+        const { obj } = sortedObjects[i];
         
         // Upload model-view and normal matrices
         uploadModelView(obj.transform);
@@ -487,6 +608,15 @@ function render() {
         
         // Draw object
         obj.object.draw(gl, program, gl.TRIANGLES);
+    }
+    
+    // Draw spotlight circles on the ground
+    if (spotlightCircle) {
+        for (let i = 0; i < MAX_LIGHTS; i++) {
+            if (lights[i]) {
+                drawSpotlightCircle(gl, program, lights[i]);
+            }
+        }
     }
 }
 
