@@ -1,5 +1,17 @@
 import { loadShadersFromURLS, setupWebGL, buildProgramFromSources } from './libs/utils.js';
-import { mat4, vec3, vec4, flatten, lookAt, perspective, mult, translate, scalem, normalMatrix, normalize } from './libs/MV.js';
+import {
+    mat4,
+    vec3,
+    vec4,
+    flatten,
+    lookAt,
+    perspective,
+    mult,
+    translate,
+    scalem,
+    normalMatrix,
+    normalize
+} from './libs/MV.js';
 import * as GUI from 'dat.gui';
 
 import * as CUBE from './libs/objects/cube.js';
@@ -20,10 +32,10 @@ let mProjection;
 let mModelView;
 let mNormal;
 
-// Scene objects
+// Scene objects (geometry + transform + material)
 const sceneObjects = [];
 
-// Camera parameters
+// Camera parameters (in world coordinates)
 const camera = {
     eye: vec3(5, 5, 5),
     at: vec3(0, 0, 0),
@@ -33,7 +45,7 @@ const camera = {
     far: 40
 };
 
-// Material for Bunny (0-255 range) - Pink/Lavender color
+// Material for Bunny (0–255 range because of dat.gui color selector)
 const bunnyMaterial = {
     Ka: [200, 150, 200],
     Kd: [220, 180, 220],
@@ -41,7 +53,7 @@ const bunnyMaterial = {
     shininess: 100
 };
 
-// Materials for other objects (different colors)
+// Simple materials for the other objects
 const materials = {
     cube: { Ka: [255, 50, 50], Kd: [255, 50, 50], Ks: [255, 255, 255], shininess: 50 },
     torus: { Ka: [50, 255, 50], Kd: [50, 255, 50], Ks: [255, 255, 255], shininess: 100 },
@@ -49,16 +61,16 @@ const materials = {
     sphere: { Ka: [255, 200, 50], Kd: [255, 200, 50], Ks: [255, 255, 255], shininess: 120 }
 };
 
-// Lights array
+// Lights array (size MAX_LIGHTS)
 const lights = [];
 for (let i = 0; i < MAX_LIGHTS; i++) {
     lights.push({
-        enabled: i === 0, // Only first light enabled by default
-        type: 0, // 0=point, 1=directional, 2=spotlight
-        position: vec4(0, 0, 10, 1),
-        axis: normalize(vec3(0, 0, -1)), // Normalized axis for spotlight
-        aperture: 10,
-        cutoff: 10,
+        enabled: i === 0,                  // Only first light enabled by default
+        type: 0,                           // 0 = point, 1 = directional, 2 = spotlight
+        position: vec4(0, 0, 10, 1),       // In camera space
+        axis: normalize(vec3(0, 0, -1)),   // Spotlight axis (direction where it points)
+        aperture: 10,                      // Aperture angle in degrees
+        cutoff: 10,                        // Exponent (η) used in cos(α)^η
         ambient: [80, 80, 80],
         diffuse: [120, 120, 120],
         specular: [200, 200, 200]
@@ -71,223 +83,245 @@ const options = {
     depthTest: true
 };
 
+// Shading mode: 0 = Gouraud (vertex), 1 = Phong (fragment)
+let shadingMode = 1;
+
 let gui;
 let lightFolders = [];
 
-// Spotlight visualization - circle on the ground
+// Data used to draw the spotlight projection circle on the ground
 let spotlightCircle = null;
 let spotlightCircleBuffer = null;
 let spotlightCircleVAO = null;
 
+/**
+ * Main setup function (called after shaders are loaded)
+ */
 function setup(shaders) {
     const canvas = document.getElementById('gl-canvas');
-    
+
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-    
+
     gl = setupWebGL(canvas);
     if (!gl) {
         console.error('WebGL not supported');
         return;
     }
-    
+
+    // Build and link the shader program
     program = buildProgramFromSources(gl, shaders['shader.vert'], shaders['shader.frag']);
     if (!program) {
         console.error('Failed to create shader program');
-        // Try to get more detailed error info
-        const vertexShader = gl.createShader(gl.VERTEX_SHADER);
-        gl.shaderSource(vertexShader, shaders['shader.vert']);
-        gl.compileShader(vertexShader);
-        if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
-            console.error('Vertex shader error:', gl.getShaderInfoLog(vertexShader));
-        }
-        
-        const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
-        gl.shaderSource(fragmentShader, shaders['shader.frag']);
-        gl.compileShader(fragmentShader);
-        if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
-            console.error('Fragment shader error:', gl.getShaderInfoLog(fragmentShader));
-        }
         return;
     }
-    
+
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.CULL_FACE);
-    
-    // Initialize objects
+
+    // Init geometry buffers
     CUBE.init(gl);
     BUNNY.init(gl);
     TORUS.init(gl);
     CYLINDER.init(gl);
-    SPHERE.init(gl, program);
-    
-    // Initialize spotlight circle visualization
+    SPHERE.init(gl, program); // not used in the scene, but ready
+
+    // Create VAO for spotlight circle visualization
     initSpotlightCircle(gl);
-    
-    // Create platform (10 x 0.5 x 10, upper face at y=0)
+
+    // ----- Build scene objects -----
+
+    // Platform: 10 x 0.5 x 10 (top face at y = 0)
     sceneObjects.push({
         object: CUBE,
         transform: mult(translate(0, -0.25, 0), scalem(10, 0.5, 10)),
         material: { Ka: [120, 80, 50], Kd: [139, 90, 43], Ks: [80, 80, 80], shininess: 30 }
     });
-    
-    // Create 4 objects in quadrants (2x2x2 cube as reference, so scale by 2)
-    // Order as in the first image: Cube (upper-left), Torus (lower-left), Bunny (lower-right), Cylinder (upper-right)
-    // Quadrant 1: Cube (upper-left)
+
+    // Cube (upper-left quadrant)
     sceneObjects.push({
         object: CUBE,
         transform: mult(translate(-2.5, 1, 2.5), scalem(2, 2, 2)),
         material: materials.cube
     });
-    
-    // Quadrant 2: Torus (lower-left originalmente, agora troca com cilindro)
+
+    // Torus (upper-right quadrant in world XZ-plane)
     sceneObjects.push({
         object: TORUS,
         transform: mult(translate(2.5, 1, 2.5), scalem(2, 2, 2)),
         material: materials.torus
     });
-    
-    // Quadrant 3: Bunny (lower-right) - most prominent in front
+
+    // Bunny (lower-right quadrant, more visible)
     sceneObjects.push({
         object: BUNNY,
         transform: mult(translate(2.5, 1, -2.5), scalem(2, 2, 2)),
         material: bunnyMaterial
     });
-    
-    // Quadrant 4: Cylinder (upper-right originalmente, agora troca com torus)
+
+    // Cylinder (lower-left quadrant)
     sceneObjects.push({
         object: CYLINDER,
         transform: mult(translate(-2.5, 1, -2.5), scalem(2, 2, 2)),
         material: materials.cylinder
     });
-    
+
+    // UI, camera matrices, events
     setupGUI();
     updateProjection();
     updateView();
-    
-    // Debug: Check if matrices are valid
-    console.log('Camera eye:', camera.eye);
-    console.log('Camera at:', camera.at);
-    console.log('Scene objects:', sceneObjects.length);
-    console.log('Program:', program);
-    
+
     window.addEventListener('resize', () => {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         gl.viewport(0, 0, canvas.width, canvas.height);
         updateProjection();
     });
-    
+
     render();
 }
 
+/**
+ * Build dat.gui interface
+ */
 function setupGUI() {
     gui = new GUI.GUI({ autoPlace: true });
-    
-    // Options
+
+    // ----- Global options -----
     const optionsFolder = gui.addFolder('options');
-    optionsFolder.open(); // Open by default
+    optionsFolder.open();
     optionsFolder.add(options, 'backfaceCulling').onChange((value) => {
-        if (value) {
-            gl.enable(gl.CULL_FACE);
-        } else {
-            gl.disable(gl.CULL_FACE);
-        }
+        if (value) gl.enable(gl.CULL_FACE);
+        else gl.disable(gl.CULL_FACE);
     });
     optionsFolder.add(options, 'depthTest').onChange((value) => {
-        if (value) {
-            gl.enable(gl.DEPTH_TEST);
-        } else {
-            gl.disable(gl.DEPTH_TEST);
-        }
+        if (value) gl.enable(gl.DEPTH_TEST);
+        else gl.disable(gl.DEPTH_TEST);
     });
-    
-    // Camera
+
+    // ----- Camera -----
     const cameraFolder = gui.addFolder('camera');
-    cameraFolder.add(camera, 'fovy', 10, 120).onChange(() => updateProjection());
-    cameraFolder.add(camera, 'near', 0.01, 5).onChange(() => updateProjection());
-    cameraFolder.add(camera, 'far', 10, 100).onChange(() => updateProjection());
-    
+    cameraFolder.add(camera, 'fovy', 10, 120).onChange(updateProjection);
+    cameraFolder.add(camera, 'near', 0.01, 5).onChange(updateProjection);
+    cameraFolder.add(camera, 'far', 10, 100).onChange(updateProjection);
+
     // Eye
     const eyeFolder = gui.addFolder('Eye');
-    eyeFolder.add(camera.eye, '0', -20, 20).name('x').onChange(() => updateView());
-    eyeFolder.add(camera.eye, '1', -20, 20).name('y').onChange(() => updateView());
-    eyeFolder.add(camera.eye, '2', -20, 20).name('z').onChange(() => updateView());
-    
+    eyeFolder.add(camera.eye, '0', -20, 20).name('x').onChange(updateView);
+    eyeFolder.add(camera.eye, '1', -20, 20).name('y').onChange(updateView);
+    eyeFolder.add(camera.eye, '2', -20, 20).name('z').onChange(updateView);
+
     // At
     const atFolder = gui.addFolder('At');
-    atFolder.add(camera.at, '0', -20, 20).name('x').onChange(() => updateView());
-    atFolder.add(camera.at, '1', -20, 20).name('y').onChange(() => updateView());
-    atFolder.add(camera.at, '2', -20, 20).name('z').onChange(() => updateView());
-    
+    atFolder.add(camera.at, '0', -20, 20).name('x').onChange(updateView);
+    atFolder.add(camera.at, '1', -20, 20).name('y').onChange(updateView);
+    atFolder.add(camera.at, '2', -20, 20).name('z').onChange(updateView);
+
     // Up
     const upFolder = gui.addFolder('Up');
-    upFolder.add(camera.up, '0', -1, 1).name('x').onChange(() => updateView());
-    upFolder.add(camera.up, '1', -1, 1).name('y').onChange(() => updateView());
-    upFolder.add(camera.up, '2', -1, 1).name('z').onChange(() => updateView());
-    
-    // Lights
+    upFolder.add(camera.up, '0', -1, 1).name('x').onChange(updateView);
+    upFolder.add(camera.up, '1', -1, 1).name('y').onChange(updateView);
+    upFolder.add(camera.up, '2', -1, 1).name('z').onChange(updateView);
+
+    // ----- Lights -----
     const lightsFolder = gui.addFolder('lights');
     lightFolders = [];
-    
-    for (let i = 0; i < 3; i++) { // Support up to 3 lights in GUI
-        const lightFolder = lightsFolder.addFolder(`Light${i + 1}`);
+
+    // Only expose first 3 lights in the GUI (can be extended)
+    for (let i = 0; i < 3; i++) {
         const light = lights[i];
-        
-        lightFolder.add(light, 'enabled').onChange(() => uploadLights());
-        
-        const typeController = lightFolder.add(light, 'type', { 'Point': 0, 'Directional': 1, 'Spotlight': 2 }).onChange(() => {
-            // Update w component based on type
-            if (light.type === 1) { // Directional
-                light.position[3] = 0;
-            } else { // Point or Spotlight
-                light.position[3] = 1;
-            }
-            uploadLights();
-        });
-        
+        const lightFolder = lightsFolder.addFolder(`Light${i + 1}`);
+
+        // Enable / disable
+        lightFolder.add(light, 'enabled').onChange(uploadLights);
+
+        // Type: 0 = point, 1 = directional, 2 = spotlight
+        lightFolder
+            .add(light, 'type', { Point: 0, Directional: 1, Spotlight: 2 })
+            .name('type')
+            .onChange(() => {
+                // Ensure w component is correct (1 for point/spot, 0 for directional)
+                if (light.type === 1) light.position[3] = 0;
+                else light.position[3] = 1;
+                uploadLights();
+            });
+
+        // Position
         const positionFolder = lightFolder.addFolder('position');
-        positionFolder.add(light.position, '0', -20, 20).name('x').onChange(() => uploadLights());
-        positionFolder.add(light.position, '1', -20, 20).name('y').onChange(() => uploadLights());
-        positionFolder.add(light.position, '2', -20, 20).name('z').onChange(() => uploadLights());
-        positionFolder.add(light.position, '3', 0, 1).step(1).name('w').onChange(() => uploadLights());
-        
+        positionFolder.add(light.position, '0', -20, 20).name('x').onChange(uploadLights);
+        positionFolder.add(light.position, '1', -20, 20).name('y').onChange(uploadLights);
+        positionFolder.add(light.position, '2', -20, 20).name('z').onChange(uploadLights);
+        positionFolder
+            .add(light.position, '3', 0, 1)
+            .step(1)
+            .name('w')
+            .onChange(uploadLights);
+
+        // Intensities (ambient, diffuse, specular)
         const intensitiesFolder = lightFolder.addFolder('intensities');
-        intensitiesFolder.addColor(light, 'ambient').onChange(() => uploadLights());
-        intensitiesFolder.addColor(light, 'diffuse').onChange(() => uploadLights());
-        intensitiesFolder.addColor(light, 'specular').onChange(() => uploadLights());
-        
+        intensitiesFolder.addColor(light, 'ambient').onChange(uploadLights);
+        intensitiesFolder.addColor(light, 'diffuse').onChange(uploadLights);
+        intensitiesFolder.addColor(light, 'specular').onChange(uploadLights);
+
+        // Axis (for spotlight)
         const axisFolder = lightFolder.addFolder('axis');
-        axisFolder.add(light.axis, '0', -1, 1).name('x').onChange(() => {
-            light.axis = normalize(light.axis);
-            uploadLights();
-        });
-        axisFolder.add(light.axis, '1', -1, 1).name('y').onChange(() => {
-            light.axis = normalize(light.axis);
-            uploadLights();
-        });
-        axisFolder.add(light.axis, '2', -1, 1).name('z').onChange(() => {
-            light.axis = normalize(light.axis);
-            uploadLights();
-        });
-        
-        lightFolder.add(light, 'aperture', 0, 180).onChange(() => uploadLights());
-        lightFolder.add(light, 'cutoff', 0, 50).onChange(() => uploadLights());
-        
+        axisFolder
+            .add(light.axis, '0', -1, 1)
+            .name('x')
+            .onChange(() => {
+                light.axis = normalize(light.axis);
+                uploadLights();
+            });
+        axisFolder
+            .add(light.axis, '1', -1, 1)
+            .name('y')
+            .onChange(() => {
+                light.axis = normalize(light.axis);
+                uploadLights();
+            });
+        axisFolder
+            .add(light.axis, '2', -1, 1)
+            .name('z')
+            .onChange(() => {
+                light.axis = normalize(light.axis);
+                uploadLights();
+            });
+
+        // Spotlight parameters
+        lightFolder.add(light, 'aperture', 0, 180).onChange(uploadLights);
+        lightFolder.add(light, 'cutoff', 0, 50).onChange(uploadLights);
+
         lightFolders.push(lightFolder);
     }
-    
-    // Material (for Bunny)
+
+    // ----- Bunny material -----
     const materialFolder = gui.addFolder('material');
-    materialFolder.addColor(bunnyMaterial, 'Ka').onChange(() => uploadMaterial(1));
-    materialFolder.addColor(bunnyMaterial, 'Kd').onChange(() => uploadMaterial(1));
-    materialFolder.addColor(bunnyMaterial, 'Ks').onChange(() => uploadMaterial(1));
-    materialFolder.add(bunnyMaterial, 'shininess', 1, 200).onChange(() => uploadMaterial(1));
-    
+    materialFolder.addColor(bunnyMaterial, 'Ka').onChange(() => uploadMaterialUniforms(bunnyMaterial));
+    materialFolder.addColor(bunnyMaterial, 'Kd').onChange(() => uploadMaterialUniforms(bunnyMaterial));
+    materialFolder.addColor(bunnyMaterial, 'Ks').onChange(() => uploadMaterialUniforms(bunnyMaterial));
+    materialFolder
+        .add(bunnyMaterial, 'shininess', 1, 200)
+        .onChange(() => uploadMaterialUniforms(bunnyMaterial));
+
+    // ----- Shading mode -----
+    const shadingFolder = gui.addFolder('shading');
+    const shadingParams = { mode: 'Phong' }; // default
+
+    shadingFolder
+        .add(shadingParams, 'mode', ['Phong', 'Gouraud'])
+        .name('mode')
+        .onChange((val) => {
+            shadingMode = val === 'Phong' ? 1 : 0;
+        });
+
+    // Button to close controls
     gui.add({ close: () => gui.close() }, 'close').name('Close Controls');
 }
 
+/**
+ * Recompute projection matrix (called on resize / camera change)
+ */
 function updateProjection() {
     const canvas = document.getElementById('gl-canvas');
     const aspect = canvas.width / canvas.height;
@@ -295,13 +329,17 @@ function updateProjection() {
     uploadProjection();
 }
 
+/**
+ * Recompute view matrix (camera)
+ */
 function updateView() {
-    // Normalize up vector
-    const up = normalize(camera.up);
+    const up = normalize(camera.up); // ensure up vector is normalized
     mView = lookAt(camera.eye, camera.at, up);
-    uploadView();
 }
 
+/**
+ * Upload projection matrix to shader
+ */
 function uploadProjection() {
     const loc = gl.getUniformLocation(program, 'u_projectionMatrix');
     if (loc) {
@@ -309,50 +347,38 @@ function uploadProjection() {
     }
 }
 
-function uploadView() {
-    // View matrix is combined with model matrix in modelView
-    // We'll update it when rendering
-}
-
+/**
+ * Upload model-view and normal matrices for one object
+ */
 function uploadModelView(modelMatrix) {
-    // Ensure mView is up to date
+    // Always rebuild view here to reflect latest camera parameters
     const up = normalize(camera.up);
     mView = lookAt(camera.eye, camera.at, up);
-    
+
     mModelView = mult(mView, modelMatrix);
     mNormal = normalMatrix(mModelView, true);
-    
+
     const locMV = gl.getUniformLocation(program, 'u_modelViewMatrix');
     const locN = gl.getUniformLocation(program, 'u_normalMatrix');
-    
-    if (locMV) {
-        gl.uniformMatrix4fv(locMV, false, flatten(mModelView));
-    } else {
-        console.warn('u_modelViewMatrix uniform not found');
-    }
-    if (locN) {
-        gl.uniformMatrix3fv(locN, false, flatten(mNormal));
-    } else {
-        console.warn('u_normalMatrix uniform not found');
-    }
+
+    if (locMV) gl.uniformMatrix4fv(locMV, false, flatten(mModelView));
+    if (locN) gl.uniformMatrix3fv(locN, false, flatten(mNormal));
 }
 
+/**
+ * Upload all light parameters to the shader
+ */
 function uploadLights() {
-    // Count enabled lights (up to MAX_LIGHTS)
+    // Find effective number of lights (highest enabled index + 1)
     let nLights = 0;
     for (let i = 0; i < MAX_LIGHTS; i++) {
-        if (lights[i].enabled) {
-            nLights = i + 1; // Count up to the highest enabled light index
-        }
+        if (lights[i].enabled) nLights = i + 1;
     }
+
     const locNLights = gl.getUniformLocation(program, 'u_n_lights');
-    if (locNLights) {
-        gl.uniform1i(locNLights, nLights);
-    } else {
-        console.warn('u_n_lights uniform not found');
-    }
-    
-    // Helper to convert color to array (dat.gui might return object)
+    if (locNLights) gl.uniform1i(locNLights, nLights);
+
+    // Helper to convert dat.gui color objects to arrays
     const toColorArray = (color) => {
         if (Array.isArray(color)) return color;
         if (typeof color === 'object' && color.r !== undefined) {
@@ -360,47 +386,20 @@ function uploadLights() {
         }
         return [0, 0, 0];
     };
-    
-    // Build arrays for each light property
-    const ambientArray = [];
-    const diffuseArray = [];
-    const specularArray = [];
-    const positionArray = [];
-    const axisArray = [];
-    const apertureArray = [];
-    const cutoffArray = [];
-    const typeArray = [];
-    const enabledArray = [];
-    
+
+    // Upload each light separately
     for (let i = 0; i < MAX_LIGHTS; i++) {
         const light = lights[i];
-        
-        // Convert colors to arrays
-        ambientArray.push(...toColorArray(light.ambient));
-        diffuseArray.push(...toColorArray(light.diffuse));
-        specularArray.push(...toColorArray(light.specular));
-        
-        // Position (set w based on type)
+
+        const ambient = toColorArray(light.ambient);
+        const diffuse = toColorArray(light.diffuse);
+        const specular = toColorArray(light.specular);
+
+        // Ensure w corresponds to type
         const pos = [...light.position];
-        if (light.type === 1) { // Directional
-            pos[3] = 0;
-        } else { // Point or Spotlight
-            pos[3] = 1;
-        }
-        positionArray.push(...pos);
-        
-        // Axis
-        axisArray.push(...light.axis);
-        
-        // Scalars
-        apertureArray.push(light.aperture);
-        cutoffArray.push(light.cutoff);
-        typeArray.push(light.type);
-        enabledArray.push(light.enabled ? 1 : 0);
-    }
-    
-    // Upload arrays element by element
-    for (let i = 0; i < MAX_LIGHTS; i++) {
+        if (light.type === 1) pos[3] = 0; // directional
+        else pos[3] = 1; // point or spotlight
+
         const locAmbient = gl.getUniformLocation(program, `u_light_ambient[${i}]`);
         const locDiffuse = gl.getUniformLocation(program, `u_light_diffuse[${i}]`);
         const locSpecular = gl.getUniformLocation(program, `u_light_specular[${i}]`);
@@ -410,31 +409,25 @@ function uploadLights() {
         const locCutoff = gl.getUniformLocation(program, `u_light_cutoff[${i}]`);
         const locType = gl.getUniformLocation(program, `u_light_type[${i}]`);
         const locEnabled = gl.getUniformLocation(program, `u_light_enabled[${i}]`);
-        
-        if (locAmbient) gl.uniform3fv(locAmbient, ambientArray.slice(i * 3, i * 3 + 3));
-        if (locDiffuse) gl.uniform3fv(locDiffuse, diffuseArray.slice(i * 3, i * 3 + 3));
-        if (locSpecular) gl.uniform3fv(locSpecular, specularArray.slice(i * 3, i * 3 + 3));
-        if (locPosition) gl.uniform4fv(locPosition, positionArray.slice(i * 4, i * 4 + 4));
-        if (locAxis) gl.uniform3fv(locAxis, axisArray.slice(i * 3, i * 3 + 3));
-        if (locAperture) gl.uniform1f(locAperture, apertureArray[i]);
-        if (locCutoff) gl.uniform1f(locCutoff, cutoffArray[i]);
-        if (locType) gl.uniform1i(locType, typeArray[i]);
-        if (locEnabled) gl.uniform1i(locEnabled, enabledArray[i]);
+
+        if (locAmbient) gl.uniform3fv(locAmbient, ambient);
+        if (locDiffuse) gl.uniform3fv(locDiffuse, diffuse);
+        if (locSpecular) gl.uniform3fv(locSpecular, specular);
+        if (locPosition) gl.uniform4fv(locPosition, pos);
+        if (locAxis) gl.uniform3fv(locAxis, light.axis);
+        if (locAperture) gl.uniform1f(locAperture, light.aperture);
+        if (locCutoff) gl.uniform1f(locCutoff, light.cutoff);
+        if (locType) gl.uniform1i(locType, light.type);
+        if (locEnabled) gl.uniform1i(locEnabled, light.enabled ? 1 : 0);
     }
 }
 
-function uploadMaterial(objectIndex) {
-    // Only upload material for Bunny (index 1)
-    if (objectIndex === 1) {
-        const material = bunnyMaterial;
-        uploadMaterialUniforms(material);
-    }
-}
-
+/**
+ * Upload material (for current object) to shader
+ */
 function uploadMaterialUniforms(material) {
     const prefix = 'u_material';
-    
-    // Helper to convert color to array
+
     const toColorArray = (color) => {
         if (Array.isArray(color)) return color;
         if (typeof color === 'object' && color.r !== undefined) {
@@ -442,110 +435,114 @@ function uploadMaterialUniforms(material) {
         }
         return [0, 0, 0];
     };
-    
+
     const uploadVec3 = (name, value) => {
         const loc = gl.getUniformLocation(program, `${prefix}.${name}`);
-        if (loc) {
-            const arr = toColorArray(value);
-            gl.uniform3fv(loc, arr);
-        }
+        if (loc) gl.uniform3fv(loc, toColorArray(value));
     };
+
     const uploadFloat = (name, value) => {
         const loc = gl.getUniformLocation(program, `${prefix}.${name}`);
         if (loc) gl.uniform1f(loc, value);
     };
-    
+
     uploadVec3('Ka', material.Ka);
     uploadVec3('Kd', material.Kd);
     uploadVec3('Ks', material.Ks);
     uploadFloat('shininess', material.shininess);
 }
 
+/**
+ * Upload shading mode (0 = Gouraud, 1 = Phong)
+ */
 function uploadShadingMode() {
     const loc = gl.getUniformLocation(program, 'u_shadingMode');
-    if (loc) {
-        // Always use Phong shading (mode 1) - calculated in fragment shader
-        gl.uniform1i(loc, 1);
-    }
+    if (loc) gl.uniform1i(loc, shadingMode);
 }
 
+/**
+ * Create VAO + buffers for a unit circle on the XZ plane (y = 0)
+ * Used to visualize the spotlight footprint on the ground.
+ */
 function initSpotlightCircle(gl) {
     const segments = 32;
     const points = [];
     const indices = [];
-    
+
     // Center point
     points.push(0, 0, 0);
-    
+
     // Circle points
     for (let i = 0; i <= segments; i++) {
         const angle = (i / segments) * Math.PI * 2;
         points.push(Math.cos(angle), 0, Math.sin(angle));
     }
-    
-    // Create triangle fan indices
+
+    // Triangle fan indices
     for (let i = 1; i <= segments; i++) {
         indices.push(0, i, i + 1);
     }
-    indices.push(0, segments, 1); // Close the circle
-    
-    // Create VAO
+    indices.push(0, segments, 1);
+
     spotlightCircleVAO = gl.createVertexArray();
     gl.bindVertexArray(spotlightCircleVAO);
-    
-    // Upload vertices
+
+    // Vertex buffer
     const pointsBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, pointsBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(points), gl.STATIC_DRAW);
-    
-    const a_position = 0;
+
+    const a_position = 0; // assume attribute location 0
     gl.vertexAttribPointer(a_position, 3, gl.FLOAT, false, 0, 0);
     gl.enableVertexAttribArray(a_position);
-    
-    // Upload indices
+
+    // Index buffer
     spotlightCircleBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, spotlightCircleBuffer);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW);
-    
+
     gl.bindVertexArray(null);
-    
+
     spotlightCircle = {
         indices: indices.length,
         points: points.length / 3
     };
 }
 
-function drawSpotlightCircle(gl, program, light) {
+/**
+ * Draw one spotlight circle on the ground (for a given light)
+ */
+function drawSpotlightCircle(gl, light) {
     if (light.type !== 2 || !light.enabled) return; // Only for spotlights
-    
-    // Calculate where spotlight hits the ground (y=0)
+
+    // Light position and direction in camera space
     const lightPos = vec3(light.position[0], light.position[1], light.position[2]);
     const lightDir = normalize(vec3(-light.axis[0], -light.axis[1], -light.axis[2]));
-    
-    // If light is above ground and pointing down
+
+    // Only if light is above ground and pointing down
     if (lightPos[1] > 0 && lightDir[1] < 0) {
-        // Calculate intersection with ground plane (y=0)
+        // Intersection of ray with plane y = 0
         const t = -lightPos[1] / lightDir[1];
         const groundPos = vec3(
             lightPos[0] + lightDir[0] * t,
-            0.01, // Slightly above ground to avoid z-fighting
+            0.01, // slightly above to avoid z-fighting
             lightPos[2] + lightDir[2] * t
         );
-        
-        // Calculate circle radius based on distance and aperture
+
+        // Radius from distance and aperture angle
         const distance = Math.abs(lightPos[1] / lightDir[1]);
         const radius = distance * Math.tan((light.aperture / 2) * Math.PI / 180);
-        
-        // Create transformation matrix for the circle
+
+        // Transform circle to the correct position and size
         const circleTransform = mult(
             translate(groundPos[0], groundPos[1], groundPos[2]),
             scalem(radius, 1, radius)
         );
-        
-        // Upload transformation
+
+        // Use same model-view upload as other objects
         uploadModelView(circleTransform);
-        
-        // Use a semi-transparent material for the circle
+
+        // Simple bright material for circle
         const circleMaterial = {
             Ka: [255, 255, 200],
             Kd: [255, 255, 200],
@@ -553,8 +550,7 @@ function drawSpotlightCircle(gl, program, light) {
             shininess: 1
         };
         uploadMaterialUniforms(circleMaterial);
-        
-        // Draw the circle
+
         gl.bindVertexArray(spotlightCircleVAO);
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, spotlightCircleBuffer);
         gl.drawElements(gl.TRIANGLES, spotlightCircle.indices, gl.UNSIGNED_SHORT, 0);
@@ -562,69 +558,56 @@ function drawSpotlightCircle(gl, program, light) {
     }
 }
 
+/**
+ * Main render loop
+ */
 function render() {
     requestAnimationFrame(render);
-    
+
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    
     gl.useProgram(program);
-    
-    // Upload projection matrix (needs to be done each frame in case it changed)
+
+    // Upload global uniforms (once per frame)
     uploadProjection();
-    
-    // Upload lights and shading mode (once per frame)
     uploadLights();
-    uploadShadingMode(); // 0 = Gouraud (vertex shader), 1 = Phong (fragment shader)
-    
-    // Sort objects by distance from camera (render farthest first for proper depth)
-    const sortedObjects = sceneObjects.map((obj, index) => {
-        // Extract position from transform matrix (translation is in last column)
-        const pos = vec3(
-            obj.transform[0][3],
-            obj.transform[1][3],
-            obj.transform[2][3]
-        );
-        // Calculate distance from camera
-        const dist = Math.sqrt(
-            Math.pow(pos[0] - camera.eye[0], 2) +
-            Math.pow(pos[1] - camera.eye[1], 2) +
-            Math.pow(pos[2] - camera.eye[2], 2)
-        );
-        return { obj, dist, index };
+    uploadShadingMode();
+
+    // Sort objects by distance from camera (farthest first)
+    const sortedObjects = sceneObjects.map((obj) => {
+        const pos = vec3(obj.transform[0][3], obj.transform[1][3], obj.transform[2][3]);
+        const dx = pos[0] - camera.eye[0];
+        const dy = pos[1] - camera.eye[1];
+        const dz = pos[2] - camera.eye[2];
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        return { obj, dist };
     });
-    
-    // Sort by distance (farthest first)
     sortedObjects.sort((a, b) => b.dist - a.dist);
-    
-    // Render each object in sorted order
+
+    // Draw each object
     for (let i = 0; i < sortedObjects.length; i++) {
         const { obj } = sortedObjects[i];
-        
-        // Upload model-view and normal matrices
+
         uploadModelView(obj.transform);
-        
-        // Upload material
         uploadMaterialUniforms(obj.material);
-        
-        // Draw object
         obj.object.draw(gl, program, gl.TRIANGLES);
     }
-    
+
     // Draw spotlight circles on the ground
     if (spotlightCircle) {
         for (let i = 0; i < MAX_LIGHTS; i++) {
             if (lights[i]) {
-                drawSpotlightCircle(gl, program, lights[i]);
+                drawSpotlightCircle(gl, lights[i]);
             }
         }
     }
 }
 
-// Load shaders and start
+// ----- Load shaders and start the app -----
 const shaderUrls = ['shader.vert', 'shader.frag'];
-loadShadersFromURLS(shaderUrls).then(shaders => {
-    setup(shaders);
-}).catch(err => {
-    console.error('Failed to load shaders:', err);
-});
-
+loadShadersFromURLS(shaderUrls)
+    .then((shaders) => {
+        setup(shaders);
+    })
+    .catch((err) => {
+        console.error('Failed to load shaders:', err);
+    });
