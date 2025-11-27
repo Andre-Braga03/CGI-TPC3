@@ -10,8 +10,13 @@ import {
     translate,
     scalem,
     normalMatrix,
-    normalize
+    normalize,
+    add,
+    subtract,
+    cross,
+    scale
 } from './libs/MV.js';
+
 import * as GUI from 'dat.gui';
 
 import * as CUBE from './libs/objects/cube.js';
@@ -37,13 +42,41 @@ const sceneObjects = [];
 
 // Camera parameters (in world coordinates)
 const camera = {
-    eye: vec3(5, 5, 5),
-    at: vec3(0, 0, 0),
+    // Camera position in world coordinates
+    eye: vec3(0, 7, 13),
+
+    // Point we are looking at (center of the scene)
+    at: vec3(0, 1, 0),
+
+    // Up direction
     up: vec3(0, 1, 0),
+
+    // Perspective parameters
     fovy: 45,
     near: 0.1,
     far: 40
 };
+
+// Store initial camera values (for reset)
+const initialCamera = {
+    eye: vec3(camera.eye[0], camera.eye[1], camera.eye[2]),
+    at: vec3(camera.at[0], camera.at[1], camera.at[2]),
+    up: vec3(camera.up[0], camera.up[1], camera.up[2])
+};
+
+// Camera orientation (yaw/pitch in radians)
+let yaw = 0;
+let pitch = 0;
+
+// Input state
+const keyState = {};
+let lastFrameTime = 0;
+let isMouseDown = false;
+let lastMouseX = 0;
+let lastMouseY = 0;
+
+const mouseSensitivity = 0.001;   // mouse look speed
+const moveSpeed       = 2.0;      // movement units per second
 
 // Material for Bunny (0–255 range because of dat.gui color selector)
 const bunnyMaterial = {
@@ -171,6 +204,8 @@ function setup(shaders) {
     setupGUI();
     updateProjection();
     updateView();
+    computeInitialAngles();
+    initInputHandlers(canvas);
 
     window.addEventListener('resize', () => {
         canvas.width = window.innerWidth;
@@ -558,21 +593,139 @@ function drawSpotlightCircle(gl, light) {
     }
 }
 
+// Compute yaw and pitch from current camera eye/at
+function computeInitialAngles() {
+    const f = normalize(subtract(camera.at, camera.eye)); // forward
+    yaw   = Math.atan2(f[2], f[0]);
+    pitch = Math.asin(f[1]);
+}
+
+// Update camera.at from eye + yaw/pitch
+function updateCameraFromAngles() {
+    const cosPitch = Math.cos(pitch);
+    const sinPitch = Math.sin(pitch);
+    const cosYaw   = Math.cos(yaw);
+    const sinYaw   = Math.sin(yaw);
+
+    const forward = vec3(
+        cosPitch * cosYaw,
+        sinPitch,
+        cosPitch * sinYaw
+    );
+
+    camera.at = add(camera.eye, forward);
+}
+
+// Reset camera to initial state (key: R)
+function resetCamera() {
+    camera.eye = vec3(initialCamera.eye[0], initialCamera.eye[1], initialCamera.eye[2]);
+    camera.at  = vec3(initialCamera.at[0], initialCamera.at[1], initialCamera.at[2]);
+    camera.up  = vec3(initialCamera.up[0], initialCamera.up[1], initialCamera.up[2]);
+    computeInitialAngles();
+}
+
+function initInputHandlers(canvas) {
+    // Keyboard
+    window.addEventListener('keydown', (e) => {
+        keyState[e.code] = true;
+
+        // Reset camera with "R"
+        if (e.code === 'KeyR') {
+            resetCamera();
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        keyState[e.code] = false;
+    });
+
+    // Mouse drag to look around
+    canvas.addEventListener('mousedown', (e) => {
+        isMouseDown = true;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+    });
+
+    window.addEventListener('mouseup', () => {
+        isMouseDown = false;
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!isMouseDown) return;
+
+        const dx = e.clientX - lastMouseX;
+        const dy = e.clientY - lastMouseY;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+
+        yaw   += dx * mouseSensitivity;
+        pitch -= dy * mouseSensitivity;
+
+        // Clamp pitch to avoid flipping
+        const maxPitch = Math.PI / 2 - 0.01;
+        if (pitch >  maxPitch) pitch =  maxPitch;
+        if (pitch < -maxPitch) pitch = -maxPitch;
+
+        updateCameraFromAngles();
+    });
+}
+
+function updateCameraFromInput(dt) {
+    if (dt <= 0) return;
+
+    // Current forward and right vectors
+    const forward = normalize(subtract(camera.at, camera.eye));
+    const worldUp = vec3(0, 1, 0);
+    const right   = normalize(cross(forward, worldUp));
+
+    let move = vec3(0, 0, 0);
+
+    // W/S = forward/backward
+    if (keyState['KeyW']) move = add(move, forward);
+    if (keyState['KeyS']) move = subtract(move, forward);
+
+    // A/D = left/right
+    if (keyState['KeyA']) move = subtract(move, right);
+    if (keyState['KeyD']) move = add(move, right);
+
+    // Space / Shift = up/down (optional)
+    if (keyState['Space'])        move = add(move, worldUp);
+    if (keyState['ShiftLeft'] ||
+        keyState['ShiftRight'])   move = subtract(move, worldUp);
+
+    // No movement
+    if (move[0] === 0 && move[1] === 0 && move[2] === 0) return;
+
+    move = normalize(move);
+    move = scale(moveSpeed * dt, move);
+
+    camera.eye = add(camera.eye, move);
+    camera.at  = add(camera.at, move);
+}
+
+
 /**
  * Main render loop
  */
-function render() {
+function render(timestamp) {
     requestAnimationFrame(render);
+
+    // Compute delta time in seconds
+    const dt = lastFrameTime ? (timestamp - lastFrameTime) / 1000.0 : 0;
+    lastFrameTime = timestamp;
+
+    // Update camera from keyboard each frame
+    updateCameraFromInput(dt);
 
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.useProgram(program);
 
-    // Upload global uniforms (once per frame)
+    // Upload global uniforms
     uploadProjection();
     uploadLights();
     uploadShadingMode();
 
-    // Sort objects by distance from camera (farthest first)
+    // Sort and draw objects (igual ao que já tinhas)
     const sortedObjects = sceneObjects.map((obj) => {
         const pos = vec3(obj.transform[0][3], obj.transform[1][3], obj.transform[2][3]);
         const dx = pos[0] - camera.eye[0];
@@ -583,16 +736,13 @@ function render() {
     });
     sortedObjects.sort((a, b) => b.dist - a.dist);
 
-    // Draw each object
     for (let i = 0; i < sortedObjects.length; i++) {
         const { obj } = sortedObjects[i];
-
         uploadModelView(obj.transform);
         uploadMaterialUniforms(obj.material);
         obj.object.draw(gl, program, gl.TRIANGLES);
     }
 
-    // Draw spotlight circles on the ground
     if (spotlightCircle) {
         for (let i = 0; i < MAX_LIGHTS; i++) {
             if (lights[i]) {
