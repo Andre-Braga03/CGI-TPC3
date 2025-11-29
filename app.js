@@ -72,8 +72,7 @@ let isMouseDown = false;
 let lastMouseX = 0;
 let lastMouseY = 0;
 
-const mouseSensitivity = 0.001;   // mouse look speed
-const moveSpeed       = 2.0;      // movement units per second
+const moveSpeed = 2.0;      // movement units per second
 
 // Base materials (0–255 range)
 const baseMaterials = {
@@ -178,7 +177,7 @@ function setup(shaders) {
     sceneObjects.push({
         name: 'Torus',
         object: TORUS,
-        transform: mult(translate(-2.5, 0.5,  2.5), scalem(2, 2, 2)),
+        transform: mult(translate(-2.5, 0.4,  2.5), scalem(2, 2, 2)),
         material: { ...baseMaterials.torus }
     });
 
@@ -186,7 +185,7 @@ function setup(shaders) {
     sceneObjects.push({
         name: 'Cylinder',
         object: CYLINDER,
-        transform: mult(translate( 2.5, 1, -2.5), scalem(2, 2, 2)),
+        transform: mult(translate(2.5, 1, -2.5), scalem(2, 2, 2)),
         material: { ...baseMaterials.cylinder }
     });
 
@@ -194,7 +193,7 @@ function setup(shaders) {
     sceneObjects.push({
         name: 'Bunny',
         object: BUNNY,
-        transform: mult(translate( 2.5, 1,  2.5), scalem(2, 2, 2)),
+        transform: mult(translate(2.5, 1,  2.5), scalem(2, 2, 2)),
         material: { ...baseMaterials.bunny }
     });
 
