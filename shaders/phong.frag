@@ -1,19 +1,14 @@
 #version 300 es
 
+precision mediump float;
 precision mediump int;
 
 const int MAX_LIGHTS = 8;
 
-in vec3 a_position;
-in vec3 a_normal;
+in vec3 v_position;
+in vec3 v_normal;
 
-uniform mat4 u_modelViewMatrix;
-uniform mat4 u_projectionMatrix;
-uniform mat3 u_normalMatrix;
-
-// Lighting uniforms
 uniform int u_n_lights;
-uniform int u_shadingMode; // 0 = Gouraud, 1 = Phong
 
 // Light arrays
 uniform mediump vec3  u_light_ambient[MAX_LIGHTS];
@@ -35,11 +30,9 @@ struct MaterialInfo {
 
 uniform MaterialInfo u_material;
 
-out vec3 v_position; // position in eye coordinates
-out vec3 v_normal;   // normal in eye coordinates
-out vec3 v_color;    // used for Gouraud shading
+out vec4 fragColor;
 
-// Phong lighting computation (same logic as in fragment shader)
+// Phong lighting per fragment
 vec3 phongLighting(vec3 position, vec3 normal, MaterialInfo material) {
     vec3 color = vec3(0.0);
 
@@ -54,19 +47,19 @@ vec3 phongLighting(vec3 position, vec3 normal, MaterialInfo material) {
         vec3 lightDiffuse = u_light_diffuse[i];
         vec3 lightSpecular= u_light_specular[i];
 
-        // Compute light direction L
+        // Direction from point to light (or from dir)
         vec3 L;
         if (lightType == 1) {
-            // Directional light: position stores direction
+            // Directional light
             L = normalize(-lightPos);
         } else {
-            // Point or spotlight: from point to light
+            // Point or spotlight
             L = normalize(lightPos - position);
         }
 
         // Spotlight attenuation
         float spotAttenuation = 1.0;
-        if (lightType == 2) { // Spotlight
+        if (lightType == 2) {
             // Angle between L and -axis
             vec3 lightDir  = normalize(-u_light_axis[i]);
             float cosAlpha = dot(L, lightDir);
@@ -75,22 +68,22 @@ vec3 phongLighting(vec3 position, vec3 normal, MaterialInfo material) {
             if (cosAlpha >= cosAperture) {
                 spotAttenuation = pow(max(0.0, cosAlpha), u_light_cutoff[i]);
             } else {
-                spotAttenuation = 0.0; // outside the cone
+                spotAttenuation = 0.0;
             }
         }
 
         if (spotAttenuation > 0.0) {
-            // Ambient term (normalize 0–255 to 0–1)
+            // Ambient
             vec3 ambient = (material.Ka / 255.0) * (lightAmbient / 255.0);
 
-            // Diffuse term
+            // Diffuse
             float NdotL = max(0.0, dot(normal, L));
             vec3 diffuse = (material.Kd / 255.0) * (lightDiffuse / 255.0) * NdotL;
 
-            // Specular term
+            // Specular
             vec3 specular = vec3(0.0);
             if (NdotL > 0.0) {
-                vec3 V = normalize(-position); // view vector (camera at origin)
+                vec3 V = normalize(-position); // camera at origin
                 vec3 R = reflect(-L, normal);
                 float RdotV = max(0.0, dot(R, V));
                 specular = (material.Ks / 255.0) * (lightSpecular / 255.0)
@@ -105,21 +98,6 @@ vec3 phongLighting(vec3 position, vec3 normal, MaterialInfo material) {
 }
 
 void main() {
-    // Transform to eye coordinates
-    vec4 positionEye = u_modelViewMatrix * vec4(a_position, 1.0);
-    vec3 normalEye   = normalize(u_normalMatrix * a_normal);
-
-    v_position = positionEye.xyz;
-    v_normal   = normalEye;
-
-    // Gouraud or Phong
-    if (u_shadingMode == 0) {
-        // Gouraud shading: compute lighting here
-        v_color = phongLighting(positionEye.xyz, normalEye, u_material);
-    } else {
-        // Phong shading: color computed in fragment shader
-        v_color = vec3(0.0);
-    }
-
-    gl_Position = u_projectionMatrix * positionEye;
+    vec3 color = phongLighting(v_position, normalize(v_normal), u_material);
+    fragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }
