@@ -10,7 +10,6 @@ import {
     rotate,
     translate,
     scalem,
-    rotateY,
     normalMatrix,
     normalize,
     add,
@@ -47,7 +46,7 @@ const sceneObjects = [];
 // Camera parameters (world coordinates)
 const camera = {
     eye: vec3(0, 7, 13),   
-    at:  vec3(0, 1, 0),     
+    at:  vec3(0, 1, 0),   
     up:  vec3(0, 1, 0),
 
     fovy: 45,
@@ -167,38 +166,35 @@ function setup(shaders) {
         material: { ...baseMaterials.platform }
     });
 
-    // Cube → Upper-Left (UL) = x -2.5 , z +2.5
+    // Cube → Upper-Left (atrás à esquerda)
     sceneObjects.push({
         name: 'Cube',
         object: CUBE,
-        transform: mult(translate(-2.5, 1, 2.5), scalem(2, 2, 2)),
+        transform: mult(translate(-2.5, 1, -2.5), scalem(2, 2, 2)),
         material: { ...baseMaterials.cube }
     });
 
-    // Torus → Lower-Left
+    // Torus → Lower-Left (frente à esquerda)
     sceneObjects.push({
         name: 'Torus',
         object: TORUS,
-        transform: mult(translate(-2.5, 0.5, -2.5), scalem(2, 2, 2)),
+        transform: mult(translate(-2.5, 0.5,  2.5), scalem(2, 2, 2)),
         material: { ...baseMaterials.torus }
     });
 
-    // Cylinder → Uper-Right 
+    // Cylinder → Upper-Right (atrás à direita)
     sceneObjects.push({
         name: 'Cylinder',
         object: CYLINDER,
-        transform: mult(translate(2.5, 1, 2.5), scalem(2, 2, 2)),
+        transform: mult(translate( 2.5, 1, -2.5), scalem(2, 2, 2)),
         material: { ...baseMaterials.cylinder }
     });
 
-    // Bunny → Lower-Right 
+    // Bunny → Lower-Right (frente à direita)
     sceneObjects.push({
         name: 'Bunny',
         object: BUNNY,
-        transform: mult(
-            translate(2.5, 1, -2.5),
-            mult(rotateY(90), scalem(2, 2, 2))
-        ),
+        transform: mult(translate( 2.5, 1,  2.5), scalem(2, 2, 2)),
         material: { ...baseMaterials.bunny }
     });
 
