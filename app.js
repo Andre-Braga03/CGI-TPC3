@@ -1,3 +1,6 @@
+// ------------------------------------------------------------
+// Imports
+// ------------------------------------------------------------
 import { loadShadersFromURLS, setupWebGL, buildProgramFromSources } from './libs/utils.js';
 import {
     vec2,
@@ -297,8 +300,8 @@ function setupGUI() {
 
     // ----- Camera -----
     const cameraFolder = gui.addFolder('camera');
-    cameraFolder.add(camera, 'fovy', 10, 120).onChange(updateProjection);
-    cameraFolder.add(camera, 'near', 0.01, 10).onChange(updateProjection);
+    cameraFolder.add(camera, 'fovy', 10, 100).onChange(updateProjection);
+    cameraFolder.add(camera, 'near', 0.01, 100).onChange(updateProjection);
     cameraFolder.add(camera, 'far',  5, 100).onChange(updateProjection);
 
     const eyeFolder = cameraFolder.addFolder('Eye');
