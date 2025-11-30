@@ -1,6 +1,3 @@
-// ------------------------------------------------------------
-// Imports
-// ------------------------------------------------------------
 import { loadShadersFromURLS, setupWebGL, buildProgramFromSources } from './libs/utils.js';
 import {
     vec2,
