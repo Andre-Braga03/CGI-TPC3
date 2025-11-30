@@ -91,46 +91,49 @@ const baseMaterials = {
 };
 
 // ------------------------------------------------------------
-// Lights (3 spotlights)
+// Lights (3 lights)
 // ------------------------------------------------------------
 const lights = [];
 
-// Common target the spotlights try to illuminate
+// Default spotlight aperture used when a light is switched to Spotlight.
+const defaultSpotAperture = 22.0;
+
+// Common target roughly at the center of the objects on the table.
 const sceneTarget = vec3(0, 1, 0);
 
-// Light 0 – top spotlight above table center
+// Light 0 – top light above table center (world coordinates)
 lights[0] = {
     enabled: true,
-    type: 2,                                // 2 = spotlight
-    position: vec4(0, 8, 0, 1),             // above table center (world space)
-    axis: normalize(subtract(sceneTarget, vec3(0, 8, 0))), // direction to target
-    aperture: 55.0,
+    type: 0,                                // default: point light
+    position: vec4(0, 10, 0, 1),            // higher and centered above table
+    axis: normalize(subtract(sceneTarget, vec3(0, 10, 0))),
+    aperture: defaultSpotAperture,
     cutoff:   15.0,
     ambient:  [80, 80, 80],
     diffuse:  [120, 120, 120],
     specular: [200, 200, 200]
 };
 
-// Light 1 – diagonal right spotlight
+// Light 1 – front-right spotlight, pointing to table center
 lights[1] = {
     enabled: true,
     type: 2,
-    position: vec4(6, 6, 6, 1),             // front-right and above
-    axis: normalize(subtract(sceneTarget, vec3(6, 6, 6))),
-    aperture: 55.0,
+    position: vec4(4, 10, 4, 1),            // front-right, higher and nearer center
+    axis: normalize(subtract(sceneTarget, vec3(4, 10, 4))),
+    aperture: defaultSpotAperture,
     cutoff:   15.0,
     ambient:  [80, 80, 80],
     diffuse:  [120, 120, 120],
     specular: [200, 200, 200]
 };
 
-// Light 2 – diagonal left spotlight
+// Light 2 – front-left spotlight, symmetric to Light1
 lights[2] = {
     enabled: true,
     type: 2,
-    position: vec4(-6, 6, 6, 1),            // front-left and above
-    axis: normalize(subtract(sceneTarget, vec3(-6, 6, 6))),
-    aperture: 55.0,
+    position: vec4(-4, 10, 4, 1),           // front-left, higher and nearer center
+    axis: normalize(subtract(sceneTarget, vec3(-4, 10, 4))),
+    aperture: defaultSpotAperture,
     cutoff:   15.0,
     ambient:  [80, 80, 80],
     diffuse:  [120, 120, 120],
@@ -340,7 +343,6 @@ function setupGUI() {
         positionFolder.add(light.position, '0', -20, 20).name('x').onChange(uploadLights);
         positionFolder.add(light.position, '1', -20, 20).name('y').onChange(uploadLights);
         positionFolder.add(light.position, '2', -20, 20).name('z').onChange(uploadLights);
-        positionFolder.add(light.position, '3', 0, 1).step(1).name('w').onChange(uploadLights);
 
         const intensitiesFolder = lightFolder.addFolder('intensities');
         intensitiesFolder.addColor(light, 'ambient').onChange(uploadLights);
@@ -620,11 +622,28 @@ function getLightCameraSpace(light) {
     const view = lookAt(camera.eye, camera.at, up);
 
     if (options.lightCoords === 'Camera') {
-        // Sliders already represent eye-space coordinates
-        return {
-            posEye: vec4(light.position[0], light.position[1], light.position[2], light.position[3]),
-            axisEye: vec3(light.axis[0], light.axis[1], light.axis[2])
-        };
+        // In CAMERA space:
+        //  - for Point / Directional lights, we use the sliders as eye-space
+        //    coordinates, so they move with the camera but keep the chosen
+        //    offset.
+        //  - for Spotlights, the assignment requires the light to be
+        //    emitted from the center of the camera. In that case the
+        //    light position is fixed at the camera origin (0,0,0) and
+        //    the axis points straight forward (0,0,-1) in eye space,
+        //    independent of the sliders.
+        if (light.type === 2) {
+            // Spotlight in camera space: always from camera center forward
+            return {
+                posEye: vec4(0, 0, 0, 1),
+                axisEye: vec3(0, 0, -1)
+            };
+        } else {
+            // Point or directional: use slider-defined coordinates in eye space
+            return {
+                posEye: vec4(light.position[0], light.position[1], light.position[2], light.position[3]),
+                axisEye: vec3(light.axis[0], light.axis[1], light.axis[2])
+            };
+        }
     } else {
         // Sliders are in world space → transform with view matrix
         const lpWorld  = vec4(light.position[0], light.position[1], light.position[2], light.position[3]);
@@ -654,22 +673,33 @@ function getLightWorldSpace(light) {
             axisWorld: normalize(vec3(light.axis[0], light.axis[1], light.axis[2]))
         };
     } else {
-        // Sliders are in camera space → convert to world space
-        const pEye = vec3(light.position[0], light.position[1], light.position[2]);
+        // Sliders are in camera space → convert to world space.
+        // For Spotlights in CAMERA space, we want the light to come from
+        // the camera center and follow its viewing direction, regardless
+        // of the slider values.
+        if (light.type === 2) {
+            const posWorld = vec3(camera.eye[0], camera.eye[1], camera.eye[2]);
+            const axisWorld = basis.forward; // from eye towards "at"
+            return { posWorld, axisWorld };
+        } else {
+            // Point/Directional: use slider-defined eye-space position,
+            // then convert to world with the camera basis.
+            const pEye = vec3(light.position[0], light.position[1], light.position[2]);
 
-        // Pw = eye + x * right + y * up - z * forward
-        let posWorld = add(camera.eye, scale(pEye[0], basis.right));
-        posWorld = add(posWorld,       scale(pEye[1], basis.up));
-        posWorld = add(posWorld,       scale(-pEye[2], basis.forward));
+            // Pw = eye + x * right + y * up - z * forward
+            let posWorld = add(camera.eye, scale(pEye[0], basis.right));
+            posWorld = add(posWorld,       scale(pEye[1], basis.up));
+            posWorld = add(posWorld,       scale(-pEye[2], basis.forward));
 
-        const aEye = vec3(light.axis[0], light.axis[1], light.axis[2]);
+            const aEye = vec3(light.axis[0], light.axis[1], light.axis[2]);
 
-        let axisWorld = add(scale(aEye[0], basis.right),
-                            scale(aEye[1], basis.up));
-        axisWorld = add(axisWorld, scale(-aEye[2], basis.forward));
-        axisWorld = normalize(axisWorld);
+            let axisWorld = add(scale(aEye[0], basis.right),
+                                scale(aEye[1], basis.up));
+            axisWorld = add(axisWorld, scale(-aEye[2], basis.forward));
+            axisWorld = normalize(axisWorld);
 
-        return { posWorld, axisWorld };
+            return { posWorld, axisWorld };
+        }
     }
 }
 
@@ -828,15 +858,14 @@ function drawSpotlightCircle(gl, light) {
     const lightPosWorld = lw.posWorld;
     const axisWorld     = lw.axisWorld;
 
-    // Spotlight direction: along -axis (same as in shader)
-    const lightDirWorld = normalize(vec3(
-        -axisWorld[0],
-        -axisWorld[1],
-        -axisWorld[2]
-    ));
+    // Spotlight central direction: use the same convention as u_light_axis,
+    // i.e. axis points from the light towards the scene (downwards to table).
+    const lightDirWorld = normalize(axisWorld);
 
-    // Intersect ray with plane y = 0 (the table)
-    if (lightPosWorld[1] > 0 && lightDirWorld[1] < 0.0) {
+    // Intersect ray with plane y = 0 (the table top). We only draw a circle
+    // when the light is above the table and the cone is actually pointing
+    // towards it (dir.y < 0).
+    if (lightPosWorld[1] > 0.0 && lightDirWorld[1] < 0.0) {
         const t = -lightPosWorld[1] / lightDirWorld[1];
 
         const groundPos = vec3(
@@ -915,10 +944,21 @@ function render(timestamp) {
     }
 
     // Draw spotlight circles (for visualization)
+    // In CAMERA mode, spotlights are aligned with the camera forward axis,
+    // so the footprint appears centered in the view.
+    //
+    // In WORLD mode we only draw the footprint when the camera is above
+    // the table (eye.y > 0). This avoids seeing the circle from "below
+    // the floor" when the user flies under the platform.
     if (spotlightCircle) {
-        for (let i = 0; i < MAX_LIGHTS; i++) {
-            if (lights[i]) {
-                drawSpotlightCircle(gl, lights[i]);
+        const cameraAboveTable = camera.eye[1] > 0.0;
+        if (options.lightCoords === 'World' && !cameraAboveTable) {
+            // Skip drawing spotlight circles when looking from below.
+        } else {
+            for (let i = 0; i < MAX_LIGHTS; i++) {
+                if (lights[i]) {
+                    drawSpotlightCircle(gl, lights[i]);
+                }
             }
         }
     }
