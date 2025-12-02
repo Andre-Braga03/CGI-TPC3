@@ -1,6 +1,3 @@
-// ------------------------------------------------------------
-// Imports
-// ------------------------------------------------------------
 import { loadShadersFromURLS, setupWebGL, buildProgramFromSources } from './libs/utils.js';
 import {
     vec2,
@@ -29,12 +26,9 @@ import * as BUNNY from './libs/objects/bunny.js';
 import * as TORUS from './libs/objects/torus.js';
 import * as CYLINDER from './libs/objects/cylinder.js';
 
-// ------------------------------------------------------------
-// Globals
-// ------------------------------------------------------------
-const MAX_LIGHTS = 3; // how many lights we support
 
-/** @type {WebGL2RenderingContext} */
+const MAX_LIGHTS = 8; // how many lights we support
+
 let gl;
 let program;        // current shader
 let programPhong;   // Phong shading (per-fragment)
