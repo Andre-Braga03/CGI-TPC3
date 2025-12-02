@@ -40,7 +40,7 @@ let mProjection;
 let mModelView;
 let mNormal;
 
-// Scene objects (geometry + transform + material)
+// Scene objects array
 const sceneObjects = [];
 
 // ------------------------------------------------------------
@@ -49,8 +49,8 @@ const sceneObjects = [];
 // ------------------------------------------------------------
 const camera = {
     eye: vec3(0, 7, 13), // camera position
-    at:  vec3(0, 1, 0),  // point we look at
-    up:  vec3(0, 1, 0),  // up direction
+    at: vec3(0, 1, 0),  // point we look at
+    up: vec3(0, 1, 0),  // up direction
 
     fovy: 45,   // field of view (degrees)
     near: 0.1,  // near clipping plane
@@ -60,8 +60,8 @@ const camera = {
 // Save initial camera to allow reset
 const initialCamera = {
     eye: vec3(camera.eye[0], camera.eye[1], camera.eye[2]),
-    at:  vec3(camera.at[0],  camera.at[1],  camera.at[2]),
-    up:  vec3(camera.up[0],  camera.up[1],  camera.up[2])
+    at: vec3(camera.at[0],  camera.at[1],  camera.at[2]),
+    up: vec3(camera.up[0],  camera.up[1],  camera.up[2])
 };
 
 // Input state
@@ -85,52 +85,52 @@ const baseMaterials = {
 };
 
 // ------------------------------------------------------------
-// Lights (3 lights)
+// Lights array
 // ------------------------------------------------------------
 const lights = [];
 
 // Default spotlight aperture used when a light is switched to Spotlight.
 const defaultSpotAperture = 22.0;
 
-// Common target roughly at the center of the objects on the table.
+// Common target at the center of the objects on the table.
 const sceneTarget = vec3(0, 1, 0);
 
-// Light 0 – top light above table center (world coordinates)
+// Light 0 – top light above table center
 lights[0] = {
     enabled: true,
-    type: 0,                                // default: point light
-    position: vec4(0, 10, 0, 1),            // higher and centered above table
+    type: 0,                                
+    position: vec4(0, 10, 0, 1),            
     axis: normalize(subtract(sceneTarget, vec3(0, 10, 0))),
     aperture: defaultSpotAperture,
-    cutoff:   15.0,
-    ambient:  [80, 80, 80],
-    diffuse:  [120, 120, 120],
+    cutoff: 15.0,
+    ambient: [80, 80, 80],
+    diffuse: [120, 120, 120],
     specular: [200, 200, 200]
 };
 
-// Light 1 – front-right spotlight, pointing to table center
+// Light 1 – front-right
 lights[1] = {
     enabled: true,
     type: 2,
-    position: vec4(4, 10, 4, 1),            // front-right, higher and nearer center
+    position: vec4(4, 10, 4, 1),          
     axis: normalize(subtract(sceneTarget, vec3(4, 10, 4))),
     aperture: defaultSpotAperture,
-    cutoff:   15.0,
-    ambient:  [80, 80, 80],
-    diffuse:  [120, 120, 120],
+    cutoff: 15.0,
+    ambient: [80, 80, 80],
+    diffuse: [120, 120, 120],
     specular: [200, 200, 200]
 };
 
-// Light 2 – front-left spotlight, symmetric to Light1
+// Light 2 – front-left 
 lights[2] = {
     enabled: true,
     type: 2,
-    position: vec4(-4, 10, 4, 1),           // front-left, higher and nearer center
+    position: vec4(-4, 10, 4, 1),          
     axis: normalize(subtract(sceneTarget, vec3(-4, 10, 4))),
     aperture: defaultSpotAperture,
-    cutoff:   15.0,
-    ambient:  [80, 80, 80],
-    diffuse:  [120, 120, 120],
+    cutoff: 15.0,
+    ambient: [80, 80, 80],
+    diffuse: [120, 120, 120],
     specular: [200, 200, 200]
 };
 
@@ -138,8 +138,8 @@ lights[2] = {
 const options = {
     backfaceCulling: true,
     depthTest: true,
-    // "Camera": sliders represent eye-space coords (lights move with camera)
-    // "World" : sliders represent world-space coords (lights fixed in scene)
+    // "Camera": sliders represent eye-space coordinates (lights move with camera)
+    // "World" : sliders represent world-space coordinates (lights fixed in scene)
     lightCoords: 'Camera'
 };
 
@@ -172,7 +172,7 @@ function onCameraChanged() {
 function setup(shaders) {
     const canvas = document.getElementById('gl-canvas');
 
-    canvas.width  = window.innerWidth;
+    canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
     gl = setupWebGL(canvas);
@@ -182,7 +182,7 @@ function setup(shaders) {
     }
 
     // Build shader programs
-    programPhong   = buildProgramFromSources(gl, shaders['phong.vert'],   shaders['phong.frag']);
+    programPhong = buildProgramFromSources(gl, shaders['phong.vert'],   shaders['phong.frag']);
     programGouraud = buildProgramFromSources(gl, shaders['gouraud.vert'], shaders['gouraud.frag']);
 
     if (!programPhong || !programGouraud) {
@@ -194,7 +194,6 @@ function setup(shaders) {
     program = programPhong;
     gl.useProgram(program);
 
-    // Basic GL state
     gl.clearColor(0.0, 0.0, 0.0, 1.0);
     gl.enable(gl.DEPTH_TEST);
     gl.enable(gl.CULL_FACE);
@@ -210,7 +209,7 @@ function setup(shaders) {
     initSpotlightCircle(gl);
 
     // -----------------------------------------------------
-    // Build scene objects (platform + 4 shapes)
+    // Build scene objects 
     // -----------------------------------------------------
 
     // Platform: 10 x 0.5 x 10 (top surface at y = 0)
@@ -261,7 +260,7 @@ function setup(shaders) {
 
     // Handle window resize
     window.addEventListener('resize', () => {
-        canvas.width  = window.innerWidth;
+        canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
         gl.viewport(0, 0, canvas.width, canvas.height);
         updateProjection();
@@ -327,7 +326,6 @@ function setupGUI() {
             .add(light, 'type', { Point: 0, Directional: 1, Spotlight: 2 })
             .name('type')
             .onChange(() => {
-                // w = 0 → directional, w = 1 → point/spot
                 if (light.type === 1) light.position[3] = 0;
                 else light.position[3] = 1;
                 uploadLights();
@@ -395,7 +393,6 @@ function updateProjection() {
     const canvas = document.getElementById('gl-canvas');
     const aspect = canvas.width / canvas.height;
 
-    // Simple safety: keep near < far
     if (camera.near < 0.01) camera.near = 0.01;
     if (camera.near >= camera.far - 0.01) {
         camera.near = camera.far - 0.01;
@@ -407,13 +404,13 @@ function updateProjection() {
     if (loc) gl.uniformMatrix4fv(loc, false, flatten(mProjection));
 }
 
-// Update view matrix (called when camera moves)
+// Update view matrix 
 function updateView() {
     const up = normalize(camera.up);
     mView = lookAt(camera.eye, camera.at, up);
 }
 
-// Upload current projection (called every frame before drawing)
+// Upload current projection 
 function uploadProjection() {
     const loc = gl.getUniformLocation(program, 'u_projectionMatrix');
     if (loc) gl.uniformMatrix4fv(loc, false, flatten(mProjection));
@@ -425,13 +422,13 @@ function uploadModelView(modelMatrix) {
     mView = lookAt(camera.eye, camera.at, up);
 
     mModelView = mult(mView, modelMatrix);
-    mNormal    = normalMatrix(mModelView, true);
+    mNormal = normalMatrix(mModelView, true);
 
     const locMV = gl.getUniformLocation(program, 'u_modelViewMatrix');
-    const locN  = gl.getUniformLocation(program, 'u_normalMatrix');
+    const locN = gl.getUniformLocation(program, 'u_normalMatrix');
 
     if (locMV) gl.uniformMatrix4fv(locMV, false, flatten(mModelView));
-    if (locN)  gl.uniformMatrix3fv(locN, false, flatten(mNormal));
+    if (locN) gl.uniformMatrix3fv(locN, false, flatten(mNormal));
 }
 
 /* ============================================================
@@ -440,7 +437,6 @@ function uploadModelView(modelMatrix) {
 
 /**
  * Rotate camera around "at" using mouse movement.
- * dx, dy are in pixels.
  */
 function rotateCameraWithMouse(dx, dy) {
     if (dx === 0 && dy === 0) return;
@@ -453,15 +449,15 @@ function rotateCameraWithMouse(dx, dy) {
     const axisCam = vec3(-dy, -dx, 0);
 
     // Build camera basis in world space
-    const upN     = normalize(camera.up);
+    const upN = normalize(camera.up);
     const forward = normalize(subtract(camera.at, camera.eye));
-    const right   = normalize(cross(forward, upN));
-    const trueUp  = cross(right, forward);
+    const right = normalize(cross(forward, upN));
+    const trueUp = cross(right, forward);
 
     // Convert axis from camera space → world space
     let axisWorld = add(
         add(scale(axisCam[0], right),
-            scale(axisCam[1], trueUp)),
+        scale(axisCam[1], trueUp)),
         scale(-axisCam[2], forward)
     );
     axisWorld = normalize(axisWorld);
@@ -478,7 +474,7 @@ function rotateCameraWithMouse(dx, dy) {
 
     // Apply rotation
     eyeAt = mult(R, eyeAt);
-    up4   = mult(R, up4);
+    up4 = mult(R, up4);
 
     // Update camera.eye components
     camera.eye[0] = camera.at[0] + eyeAt[0];
@@ -499,9 +495,9 @@ function rotateCameraWithMouse(dx, dy) {
  */
 function computeCameraBasis() {
     const upN = normalize(camera.up);
-    const f   = normalize(subtract(camera.at, camera.eye)); // forward
-    const s   = normalize(cross(f, upN));                   // right
-    const u   = cross(s, f);                                // true up
+    const f = normalize(subtract(camera.at, camera.eye)); 
+    const s = normalize(cross(f, upN));                   
+    const u = cross(s, f);                                
     return { right: s, up: u, forward: f };
 }
 
@@ -512,8 +508,8 @@ function resetCamera() {
     // Copy values back into camera vectors
     for (let i = 0; i < 3; i++) {
         camera.eye[i] = initialCamera.eye[i];
-        camera.at[i]  = initialCamera.at[i];
-        camera.up[i]  = initialCamera.up[i];
+        camera.at[i] = initialCamera.at[i];
+        camera.up[i] = initialCamera.up[i];
     }
 
     onCameraChanged();
@@ -529,7 +525,7 @@ function updateCameraFromInput(dt) {
 
     const forward = normalize(subtract(camera.at, camera.eye));
     const worldUp = vec3(0, 1, 0);
-    const right   = normalize(cross(forward, worldUp));
+    const right = normalize(cross(forward, worldUp));
 
     let move = vec3(0, 0, 0);
 
@@ -552,9 +548,9 @@ function updateCameraFromInput(dt) {
     camera.eye[2] += move[2];
 
     // Update at (to keep direction)
-    camera.at[0]  += move[0];
-    camera.at[1]  += move[1];
-    camera.at[2]  += move[2];
+    camera.at[0] += move[0];
+    camera.at[1] += move[1];
+    camera.at[2] += move[2];
 
     // Prevent camera from going too low
     if (camera.eye[1] < 0.3) camera.eye[1] = 0.3;
@@ -609,22 +605,12 @@ function initInputHandlers(canvas) {
 
 /**
  * Get light position & axis in CAMERA coordinates.
- * This is what the shaders expect.
  */
 function getLightCameraSpace(light) {
-    const up   = normalize(camera.up);
+    const up = normalize(camera.up);
     const view = lookAt(camera.eye, camera.at, up);
 
     if (options.lightCoords === 'Camera') {
-        // In CAMERA space:
-        //  - for Point / Directional lights, we use the sliders as eye-space
-        //    coordinates, so they move with the camera but keep the chosen
-        //    offset.
-        //  - for Spotlights, the assignment requires the light to be
-        //    emitted from the center of the camera. In that case the
-        //    light position is fixed at the camera origin (0,0,0) and
-        //    the axis points straight forward (0,0,-1) in eye space,
-        //    independent of the sliders.
         if (light.type === 2) {
             // Spotlight in camera space: always from camera center forward
             return {
@@ -655,35 +641,29 @@ function getLightCameraSpace(light) {
 
 /**
  * Get light position & axis in WORLD coordinates.
- * Used only when drawing the spotlight circle.
  */
 function getLightWorldSpace(light) {
     const basis = computeCameraBasis();
 
     if (options.lightCoords === 'World') {
-        // Sliders already in world space
         return {
             posWorld: vec3(light.position[0], light.position[1], light.position[2]),
             axisWorld: normalize(vec3(light.axis[0], light.axis[1], light.axis[2]))
         };
     } else {
         // Sliders are in camera space → convert to world space.
-        // For Spotlights in CAMERA space, we want the light to come from
-        // the camera center and follow its viewing direction, regardless
-        // of the slider values.
         if (light.type === 2) {
             const posWorld = vec3(camera.eye[0], camera.eye[1], camera.eye[2]);
-            const axisWorld = basis.forward; // from eye towards "at"
+            const axisWorld = basis.forward; 
             return { posWorld, axisWorld };
         } else {
             // Point/Directional: use slider-defined eye-space position,
             // then convert to world with the camera basis.
             const pEye = vec3(light.position[0], light.position[1], light.position[2]);
-
             // Pw = eye + x * right + y * up - z * forward
             let posWorld = add(camera.eye, scale(pEye[0], basis.right));
-            posWorld = add(posWorld,       scale(pEye[1], basis.up));
-            posWorld = add(posWorld,       scale(-pEye[2], basis.forward));
+            posWorld = add(posWorld, scale(pEye[1], basis.up));
+            posWorld = add(posWorld, scale(-pEye[2], basis.forward));
 
             const aEye = vec3(light.axis[0], light.axis[1], light.axis[2]);
 
