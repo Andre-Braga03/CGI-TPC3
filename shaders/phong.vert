@@ -3,7 +3,7 @@
 precision mediump int;
 precision mediump float;
 
-const int MAX_LIGHTS = 8;
+const int MAX_LIGHTS = 3;
 
 in vec3 a_position;
 in vec3 a_normal;
